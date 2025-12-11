@@ -34,7 +34,7 @@ const Dashboard = () => {
     try {
       const response = await api.get(`/rooms/code/${roomCode}`);
       if (response.data.room) {
-        navigate(`/room/${response.data.room.id}`);
+        navigate(`/room/${response.data.room._id}`);
       }
     } catch (error) {
       setError('Room not found with this code');
