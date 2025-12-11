@@ -1,5 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+
+const RemoteVideo = ({ stream, username, isSpeaking }) => {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.muted = false; // Ensure audio is ON
+      videoRef.current.play().catch(e => console.error("Remote play error:", e));
+    }
+  }, [stream]);
+
+  return (
+    <div className={`relative bg-gray-800 rounded-xl overflow-hidden transition-all duration-300 ${isSpeaking ? 'ring-4 ring-green-500 shadow-lg shadow-green-500/20' : 'ring-1 ring-gray-700'}`}>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="w-full h-full object-cover"
+      />
+      <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm text-white">
+        {username || 'Participant'}
+      </div>
+    </div>
+  );
+};
+
 const VideoCall = ({ socket, roomId, userId, username }) => {
   const [localStream, setLocalStream] = useState(null);
   const [peers, setPeers] = useState(new Map());
@@ -138,13 +165,6 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
 
   const startActivityDetection = () => {
     const checkActivity = () => {
-      // Check local audio
-      if (localStream) {
-        // Simple mock for local activity or use AudioContext if needed
-        // For now, let's rely on Analyser if we had one for local, 
-        // but typically we want to check all analysers
-      }
-
       // Check remote speakers
       const speakers = new Set();
       analysers.current.forEach((analyser, socketId) => {
@@ -156,10 +176,14 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
         }
       });
 
-      // Also check local volume if we want to show "You are speaking"
-      // Skipped for simplicity to avoid feedback loops unless we create a separate analyser for local
+      // Update state only if changed
+      setActiveSpeakers(prev => {
+        if (prev.size === speakers.size && [...prev].every(value => speakers.has(value))) {
+          return prev;
+        }
+        return speakers;
+      });
 
-      setActiveSpeakers(speakers);
       animationRef.current = requestAnimationFrame(checkActivity);
     };
     checkActivity();
@@ -418,20 +442,12 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
 
         {/* Remote videos */}
         {Array.from(peers.entries()).map(([socketId, peer]) => (
-          <div key={socketId} className={`relative bg-gray-800 rounded-xl overflow-hidden transition-all duration-300 ${activeSpeakers.has(socketId) ? 'ring-4 ring-green-500 shadow-lg shadow-green-500/20' : 'ring-1 ring-gray-700'
-            }`}>
-            <video
-              autoPlay
-              playsInline
-              ref={(el) => {
-                if (el && peer.stream) el.srcObject = peer.stream;
-              }}
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm text-white">
-              {peer.username || `Participant ${socketId.substr(0, 4)}...`}
-            </div>
-          </div>
+          <RemoteVideo
+            key={socketId}
+            stream={peer.stream}
+            username={peer.username || `Participant ${socketId.substr(0, 4)}...`}
+            isSpeaking={activeSpeakers.has(socketId)}
+          />
         ))}
       </div>
 
