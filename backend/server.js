@@ -37,6 +37,8 @@ app.use((req, res, next) => {
 // Routes
 app.use('/auth', authRoutes);
 app.use('/rooms', roomRoutes);
+app.use('/upload', require('./routes/upload'));
+app.use('/uploads', express.static('uploads'));
 
 // Health check
 app.get('/', (req, res) => {

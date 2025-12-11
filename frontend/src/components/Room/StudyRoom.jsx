@@ -78,9 +78,15 @@ const StudyRoom = () => {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">{room?.name}</h1>
-            <p className="text-sm text-gray-400">
-              Room Code: <span className="text-indigo-400 font-mono">{room?.code}</span>
-            </p>
+            {(room?.host?._id === user.id || room?.host === user.id) ? (
+              <p className="text-sm text-gray-400">
+                Room Code: <span className="text-indigo-400 font-mono">{room?.code}</span>
+              </p>
+            ) : (
+              <p className="text-sm text-gray-400">
+                ID: <span className="text-gray-500 font-mono">{room?._id}</span>
+              </p>
+            )}
           </div>
           <button onClick={handleLeaveRoom} className="btn-secondary">
             Leave Room
@@ -160,6 +166,7 @@ const StudyRoom = () => {
                 <DocumentEditor
                   socket={socket}
                   roomId={id}
+                  userId={user.id}
                   initialContent={room?.documentContent || ''}
                 />
               </div>
@@ -187,6 +194,7 @@ const StudyRoom = () => {
           <DocumentEditor
             socket={socket}
             roomId={id}
+            userId={user.id}
             initialContent={room?.documentContent || ''}
           />
         </div>

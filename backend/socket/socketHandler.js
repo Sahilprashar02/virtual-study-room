@@ -71,14 +71,17 @@ module.exports = (io) => {
     });
 
     // Handle chat messages
-    socket.on('chat-message', async ({ roomId, userId, username, content }) => {
+    socket.on('chat-message', async ({ roomId, userId, username, content, fileUrl, fileName, fileType }) => {
       try {
         // Save message to database
         const message = new Message({
           room: roomId,
           user: userId,
           username,
-          content
+          content,
+          fileUrl,
+          fileName,
+          fileType
         });
         await message.save();
 
@@ -87,6 +90,9 @@ module.exports = (io) => {
           id: message._id,
           username,
           content,
+          fileUrl,
+          fileName,
+          fileType,
           timestamp: message.timestamp
         });
 

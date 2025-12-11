@@ -17,8 +17,11 @@ const messageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    required: true
+    required: false // Not required if file is present
   },
+  fileUrl: String,
+  fileName: String,
+  fileType: String,
   timestamp: {
     type: Date,
     default: Date.now
