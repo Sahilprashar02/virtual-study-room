@@ -13,6 +13,7 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
   const originalStream = useRef(null);
   const audioContext = useRef(null);
   const analysers = useRef(new Map()); // socketId -> AnalyserNode
+  const iceCandidatesQueue = useRef(new Map()); // socketId -> candidates[]
   const animationRef = useRef();
 
   const iceServers = {
@@ -42,27 +43,28 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
   useEffect(() => {
     if (!socket || !hasLocalStream) return;
 
-    // When someone joins, send them an offer
+    // When someone joins, send them an offer (We are the 'Old' user, they are 'New')
     const handleUserJoined = async ({ socketId, username }) => {
       console.log('User joined:', socketId, username);
       await createPeerConnection(socketId, true, username);
     };
 
-    // Handle existing participants
+    // Handle existing participants (We are the 'New' user, they are 'Old')
+    // We should NOT create an offer. We wait for them to send us an offer.
+    // This prevents the "Double Offer" glare.
     const handleExistingParticipants = async (participants) => {
       console.log('Existing participants:', participants);
-      // participants is now an array of { socketId, username }
       for (const participant of participants) {
-        // Handle both old format (just ID) and new format (object) for compatibility
         const socketId = participant.socketId || participant;
         const username = participant.username || 'Participant';
-        await createPeerConnection(socketId, true, username);
+        // Pass false to NOT create offer. We just set up the PC to be ready.
+        await createPeerConnection(socketId, false, username);
       }
     };
 
     // Receive video offer
-    const handleOffer = async ({ offer, from }) => {
-      await handleReceiveOffer(offer, from);
+    const handleOffer = async ({ offer, from, username }) => {
+      await handleReceiveOffer(offer, from, username);
     };
 
     // Receive video answer
@@ -85,7 +87,11 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
     socket.on('video-offer', handleOffer);
     socket.on('video-answer', handleAnswer);
     socket.on('ice-candidate', handleIceCandidate);
+
     socket.on('user-left', handleUserLeftEvent);
+
+    // Request participants now that we are ready to handle them!
+    socket.emit('request-participants', { roomId });
 
     return () => {
       socket.off('user-joined', handleUserJoined);
@@ -98,11 +104,97 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, hasLocalStream]); // Only attach listeners when we have a stream to share!
 
-  // ... (startActivityDetection and attachAnalyser remain same)
+  const startLocalStream = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+      originalStream.current = stream;
+
+      // Add tracks to existing peer connections (if any)
+      peerConnections.current.forEach((pc) => {
+        stream.getTracks().forEach((track) => {
+          pc.addTrack(track, stream);
+        });
+      });
+
+    } catch (error) {
+      console.error('Error accessing media devices:', error);
+      alert('Could not access camera/microphone. Please check permissions.');
+    }
+  };
+
+  const stopLocalStream = () => {
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      setLocalStream(null);
+    }
+  };
+
+  const startActivityDetection = () => {
+    const checkActivity = () => {
+      // Check local audio
+      if (localStream) {
+        // Simple mock for local activity or use AudioContext if needed
+        // For now, let's rely on Analyser if we had one for local, 
+        // but typically we want to check all analysers
+      }
+
+      // Check remote speakers
+      const speakers = new Set();
+      analysers.current.forEach((analyser, socketId) => {
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        const volume = dataArray.reduce((subject, value) => subject + value, 0) / dataArray.length;
+        if (volume > 20) { // Threshold
+          speakers.add(socketId);
+        }
+      });
+
+      // Also check local volume if we want to show "You are speaking"
+      // Skipped for simplicity to avoid feedback loops unless we create a separate analyser for local
+
+      setActiveSpeakers(speakers);
+      animationRef.current = requestAnimationFrame(checkActivity);
+    };
+    checkActivity();
+  };
+
+  const attachAnalyser = (stream, socketId) => {
+    if (!audioContext.current) return;
+    try {
+      const source = audioContext.current.createMediaStreamSource(stream);
+      const analyser = audioContext.current.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analysers.current.set(socketId, analyser);
+    } catch (e) {
+      console.error("Audio Context Error", e);
+    }
+  };
 
   // Modified createPeerConnection to accept username
   const createPeerConnection = async (socketId, createOffer, username) => {
-    if (peerConnections.current.has(socketId)) return;
+    if (peerConnections.current.has(socketId)) {
+      // If connection exists, update username if we have a better one
+      if (username && username !== 'Participant') {
+        setPeers(prev => {
+          const existing = prev.get(socketId);
+          if (existing && existing.username !== username) {
+            const newPeers = new Map(prev);
+            newPeers.set(socketId, { ...existing, username });
+            return newPeers;
+          }
+          return prev;
+        });
+      }
+      return;
+    }
 
     const pc = new RTCPeerConnection(iceServers);
     peerConnections.current.set(socketId, pc);
@@ -133,7 +225,7 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
         return newPeers;
       });
       // Attach analyser for this peer
-      attachAnalyser(stream, socketId);
+      // attachAnalyser(stream, socketId); // DISABLED: Might interfere with audio playback in some browsers
     };
 
     // Create and send offer if initiator
@@ -147,14 +239,35 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
     }
   };
 
-  const handleReceiveOffer = async (offer, from) => {
+  const handleReceiveOffer = async (offer, from, username) => {
     // If we receive an offer, we need to create a PC if it doesn't exist
     if (!peerConnections.current.has(from)) {
-      await createPeerConnection(from, false, 'Participant');
+      await createPeerConnection(from, false, username || 'Participant');
+    } else if (username) {
+      // Update username if available
+      setPeers(prev => {
+        const existing = prev.get(from);
+        if (existing && existing.username !== username) {
+          const newPeers = new Map(prev);
+          newPeers.set(from, { ...existing, username });
+          return newPeers;
+        }
+        return prev;
+      });
     }
 
     const pc = peerConnections.current.get(from);
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    // Process queued ICE candidates
+    if (iceCandidatesQueue.current.has(from)) {
+      const candidates = iceCandidatesQueue.current.get(from);
+      console.log(`Processing ${candidates.length} queued ICE candidates for ${from}`);
+      for (const candidate of candidates) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+      iceCandidatesQueue.current.delete(from);
+    }
 
     // Important: We must have local tracks added by now (createPeerConnection does it if localStream exists)
 
@@ -177,7 +290,15 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
   const handleReceiveIceCandidate = async (candidate, from) => {
     const pc = peerConnections.current.get(from);
     if (pc) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } else {
+        // Queue it if remote description not set
+        if (!iceCandidatesQueue.current.has(from)) {
+          iceCandidatesQueue.current.set(from, []);
+        }
+        iceCandidatesQueue.current.get(from).push(candidate);
+      }
     }
   };
 
@@ -313,6 +434,23 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
           </div>
         ))}
       </div>
+
+      <button
+        className="absolute top-4 right-4 bg-gray-700/80 hover:bg-gray-600 text-white px-3 py-1 rounded-lg text-sm z-50 backdrop-blur-sm"
+        onClick={() => {
+          document.querySelectorAll('video').forEach(v => {
+            v.muted = false; // Ensure remote aren't muted
+            v.play().catch(console.error);
+          });
+          if (localVideoRef.current) localVideoRef.current.muted = true; // Keep local muted
+
+          if (audioContext.current && audioContext.current.state === 'suspended') {
+            audioContext.current.resume();
+          }
+        }}
+      >
+        🔊 Fix Audio
+      </button>
 
       {/* Controls Bar */}
       <div className="flex justify-center items-center gap-6 p-6 bg-gray-900/90 backdrop-blur-md border-t border-gray-800">

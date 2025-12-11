@@ -56,6 +56,20 @@ module.exports = (io) => {
       }
     });
 
+    // Handle request for participants (for late joiners or after media ready)
+    socket.on('request-participants', ({ roomId }) => {
+      const participants = Array.from(roomParticipants.get(roomId) || [])
+        .filter(id => id !== socket.id)
+        .map(id => {
+          const participantSocket = io.sockets.sockets.get(id);
+          return {
+            socketId: id,
+            username: participantSocket ? participantSocket.username : 'Unknown'
+          };
+        });
+      socket.emit('existing-participants', participants);
+    });
+
     // Handle chat messages
     socket.on('chat-message', async ({ roomId, userId, username, content }) => {
       try {
@@ -86,7 +100,8 @@ module.exports = (io) => {
     socket.on('video-offer', ({ offer, to }) => {
       socket.to(to).emit('video-offer', {
         offer,
-        from: socket.id
+        from: socket.id,
+        username: socket.username
       });
     });
 
@@ -94,7 +109,8 @@ module.exports = (io) => {
     socket.on('video-answer', ({ answer, to }) => {
       socket.to(to).emit('video-answer', {
         answer,
-        from: socket.id
+        from: socket.id,
+        username: socket.username
       });
     });
 
@@ -102,7 +118,8 @@ module.exports = (io) => {
     socket.on('ice-candidate', ({ candidate, to }) => {
       socket.to(to).emit('ice-candidate', {
         candidate,
-        from: socket.id
+        from: socket.id,
+        username: socket.username
       });
     });
 

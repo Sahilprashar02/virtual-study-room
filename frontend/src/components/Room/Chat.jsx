@@ -27,13 +27,15 @@ const Chat = ({ socket, roomId, userId, username }) => {
     };
   }, [socket]);
 
+  const containerRef = useRef(null);
+
   useEffect(() => {
-    scrollToBottom();
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
   }, [messages]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Removed scrollIntoView to prevent page jumping
 
   const handleSendMessage = (e) => {
     e.preventDefault();
@@ -83,7 +85,10 @@ const Chat = ({ socket, roomId, userId, username }) => {
         </h3>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth custom-scrollbar">
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth custom-scrollbar"
+      >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3 opacity-60">
             <span className="text-5xl filter grayscale">💭</span>

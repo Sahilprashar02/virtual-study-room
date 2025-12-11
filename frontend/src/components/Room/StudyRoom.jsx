@@ -72,7 +72,7 @@ const StudyRoom = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-[100dvh] w-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-gray-900 border-b border-gray-700 p-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
@@ -114,11 +114,12 @@ const StudyRoom = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Video Section */}
+      <div className="flex-1 flex overflow-hidden relative">
+
+        {/* Unified Video Layer (Desktop + Mobile) */}
+        {/* We place VideoCall in a layer that is always rendered but manipulated via CSS classes for visibility */}
         <div
-          className={`flex-1 ${activeTab === 'video' ? 'block' : 'hidden'
-            } lg:block`}
+          className={`absolute inset-0 transition-opacity duration-300 pointer-events-none lg:static lg:block lg:flex-1 lg:pointer-events-auto ${activeTab === 'video' ? 'opacity-100 z-10 pointer-events-auto' : 'opacity-0 z-0 lg:opacity-100'}`}
         >
           <VideoCall
             socket={socket}
@@ -128,68 +129,66 @@ const StudyRoom = () => {
           />
         </div>
 
-        {/* Sidebar - Desktop */}
-        <div className="hidden lg:flex lg:w-96 border-l border-gray-700">
+        {/* Desktop Sidebar (Chat/Notes) */}
+        <div className="hidden lg:flex lg:w-96 border-l border-gray-700 bg-gray-900 z-20 relative">
           <div className="flex-1 flex flex-col">
-            {/* Tab Buttons */}
             <div className="flex border-b border-gray-700">
               <button
                 onClick={() => setActiveTab('chat')}
-                className={`flex-1 py-3 ${activeTab === 'chat' ? 'bg-indigo-600' : 'bg-gray-800'
-                  }`}
+                className={`flex-1 py-3 ${activeTab === 'chat' || activeTab === 'video' ? 'bg-indigo-600' : 'bg-gray-800'}`}
               >
                 Chat
               </button>
               <button
                 onClick={() => setActiveTab('document')}
-                className={`flex-1 py-3 ${activeTab === 'document' ? 'bg-indigo-600' : 'bg-gray-800'
-                  }`}
+                className={`flex-1 py-3 ${activeTab === 'document' ? 'bg-indigo-600' : 'bg-gray-800'}`}
               >
                 Notes
               </button>
             </div>
 
-            {/* Tab Content */}
-            <div className="flex-1 overflow-hidden">
-              {activeTab === 'chat' && (
+            <div className="flex-1 overflow-hidden relative">
+              <div className={`absolute inset-0 ${activeTab === 'document' ? 'hidden' : 'block'}`}>
                 <Chat
                   socket={socket}
                   roomId={id}
                   userId={user.id}
                   username={user.username}
                 />
-              )}
-              {activeTab === 'document' && (
+              </div>
+              <div className={`absolute inset-0 ${activeTab === 'document' ? 'block' : 'hidden'}`}>
                 <DocumentEditor
                   socket={socket}
                   roomId={id}
                   initialContent={room?.documentContent || ''}
                 />
-              )}
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Mobile - Chat/Document */}
+        {/* Mobile Layers for Chat and Notes */}
+        {/* Chat Mobile Layer */}
         <div
-          className={`flex-1 ${activeTab === 'chat' || activeTab === 'document' ? 'block' : 'hidden'
-            } lg:hidden`}
+          className={`absolute inset-0 bg-gray-900 transition-opacity duration-300 lg:hidden ${activeTab === 'chat' ? 'opacity-100 z-20 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'}`}
         >
-          {activeTab === 'chat' && (
-            <Chat
-              socket={socket}
-              roomId={id}
-              userId={user.id}
-              username={user.username}
-            />
-          )}
-          {activeTab === 'document' && (
-            <DocumentEditor
-              socket={socket}
-              roomId={id}
-              initialContent={room?.documentContent || ''}
-            />
-          )}
+          <Chat
+            socket={socket}
+            roomId={id}
+            userId={user.id}
+            username={user.username}
+          />
+        </div>
+
+        {/* Document Mobile Layer */}
+        <div
+          className={`absolute inset-0 bg-gray-900 transition-opacity duration-300 lg:hidden ${activeTab === 'document' ? 'opacity-100 z-20 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'}`}
+        >
+          <DocumentEditor
+            socket={socket}
+            roomId={id}
+            initialContent={room?.documentContent || ''}
+          />
         </div>
       </div>
     </div>
