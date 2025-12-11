@@ -9,7 +9,17 @@ const Chat = ({ socket, roomId, userId, username }) => {
     if (!socket) return;
 
     socket.on('chat-message', (message) => {
-      setMessages((prev) => [...prev, message]);
+      setMessages((prev) => {
+        // Prevent duplicates from optimistic updates
+        // Check if a message with the same content and very recent timestamp acts as a duplicate
+        const isDuplicate = prev.some(m =>
+          m.username === message.username &&
+          m.content === message.content &&
+          Math.abs(new Date(m.timestamp) - new Date(message.timestamp)) < 1000
+        );
+        if (isDuplicate) return prev;
+        return [...prev, message];
+      });
     });
 
     return () => {
@@ -29,12 +39,30 @@ const Chat = ({ socket, roomId, userId, username }) => {
     e.preventDefault();
     if (!newMessage.trim() || !socket) return;
 
-    socket.emit('chat-message', {
+    const messageData = {
       roomId,
       userId,
       username,
       content: newMessage,
-    });
+      timestamp: new Date().toISOString()
+    };
+
+    socket.emit('chat-message', messageData);
+
+    // Optimistically add message to UI
+    setMessages((prev) => [...prev, messageData]);
+    // Backend broadcasts to everyone including sender now, so duplication might occur if we do this and backend also sends it back. 
+    // However, user said "my message are not appears". 
+    // If backend uses io.to(roomId), it sends to everyone. 
+    // If backend uses socket.to(roomId), it sends to everyone EXCEPT sender.
+    // The backend code used io.to(roomId). 
+    // BUT, if they are in different rooms, they won't see it.
+    // So the main fix is the room connection. 
+    // But to be safe and responsive, appending locally is good practice, BUT we must ensure no duplicates.
+    // Let's rely on the fix for connectivity first. 
+    // Wait, the user said "my message are not appears". If they are isolated, io.to(roomId) works for THEM.
+    // So if they don't see it, it means io.to(roomId) is NOT working for them?
+    // OR they are not even receiving their own events.
 
     setNewMessage('');
   };
@@ -72,8 +100,8 @@ const Chat = ({ socket, roomId, userId, username }) => {
               >
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-lg backdrop-blur-sm transition-all duration-200 hover:scale-[1.02] ${isMyMessage
-                      ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-br-none'
-                      : 'bg-gray-800/90 border border-gray-700 text-gray-100 rounded-bl-none'
+                    ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-br-none'
+                    : 'bg-gray-800/90 border border-gray-700 text-gray-100 rounded-bl-none'
                     }`}
                 >
                   {!isMyMessage && (

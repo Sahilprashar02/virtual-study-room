@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import { useAuth } from '../../context/AuthContext';
@@ -16,6 +16,29 @@ const StudyRoom = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('video'); // video, chat, document
 
+  const socketRef = useRef();
+
+  useEffect(() => {
+    const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
+    socketRef.current = io(SOCKET_URL);
+    setSocket(socketRef.current);
+
+    socketRef.current.on('connect', () => {
+      console.log('Socket connected:', socketRef.current.id);
+      socketRef.current.emit('join-room', {
+        roomId: id,
+        userId: user.id,
+        username: user.username,
+      });
+    });
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, [id, user.id, user.username]);
+
   const fetchRoomDetails = useCallback(async () => {
     try {
       const response = await api.get(`/rooms/${id}`);
@@ -28,33 +51,9 @@ const StudyRoom = () => {
     }
   }, [id, navigate]);
 
-  const initializeSocket = useCallback(() => {
-    const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
-    const newSocket = io(SOCKET_URL);
-
-    newSocket.on('connect', () => {
-      console.log('Socket connected:', newSocket.id);
-      newSocket.emit('join-room', {
-        roomId: id,
-        userId: user.id,
-        username: user.username,
-      });
-    });
-
-    setSocket(newSocket);
-  }, [id, user.id, user.username]);
-
   useEffect(() => {
     fetchRoomDetails();
-    initializeSocket();
-
-    return () => {
-      if (socket) {
-        socket.disconnect();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, fetchRoomDetails, initializeSocket]);
+  }, [fetchRoomDetails]);
 
   const handleLeaveRoom = () => {
     if (socket) {
