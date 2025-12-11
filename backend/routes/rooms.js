@@ -121,4 +121,29 @@ router.get('/messages/:roomId', auth, async (req, res) => {
   }
 });
 
+// Delete a room
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const room = await Room.findById(req.params.id);
+
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    // Check if user is host
+    if (room.host.toString() !== req.user.userId) {
+      return res.status(403).json({ message: 'Not authorized to delete this room' });
+    }
+
+    await Room.findByIdAndDelete(req.params.id);
+    // Optionally delete messages associated with the room
+    await Message.deleteMany({ room: req.params.id });
+
+    res.json({ message: 'Room deleted successfully' });
+  } catch (error) {
+    console.error('Delete room error:', error);
+    res.status(500).json({ message: 'Server error deleting room' });
+  }
+});
+
 module.exports = router;
