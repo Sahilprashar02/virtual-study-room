@@ -40,7 +40,14 @@ module.exports = (io) => {
 
         // Send current participants to the new user
         const participants = Array.from(roomParticipants.get(roomId) || [])
-          .filter(id => id !== socket.id);
+          .filter(id => id !== socket.id)
+          .map(id => {
+            const participantSocket = io.sockets.sockets.get(id);
+            return {
+              socketId: id,
+              username: participantSocket ? participantSocket.username : 'Unknown'
+            };
+          });
         socket.emit('existing-participants', participants);
 
         console.log(`👤 ${username} joined room ${roomId}`);

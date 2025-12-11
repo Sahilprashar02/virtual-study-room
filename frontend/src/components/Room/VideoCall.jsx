@@ -36,130 +36,72 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  const hasLocalStream = !!localStream;
+
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !hasLocalStream) return;
 
     // When someone joins, send them an offer
-    socket.on('user-joined', async ({ socketId }) => {
-      console.log('User joined:', socketId);
-      await createPeerConnection(socketId, true);
-    });
+    const handleUserJoined = async ({ socketId, username }) => {
+      console.log('User joined:', socketId, username);
+      await createPeerConnection(socketId, true, username);
+    };
 
     // Handle existing participants
-    socket.on('existing-participants', async (participants) => {
+    const handleExistingParticipants = async (participants) => {
       console.log('Existing participants:', participants);
-      for (const socketId of participants) {
-        await createPeerConnection(socketId, true);
+      // participants is now an array of { socketId, username }
+      for (const participant of participants) {
+        // Handle both old format (just ID) and new format (object) for compatibility
+        const socketId = participant.socketId || participant;
+        const username = participant.username || 'Participant';
+        await createPeerConnection(socketId, true, username);
       }
-    });
+    };
 
     // Receive video offer
-    socket.on('video-offer', async ({ offer, from }) => {
+    const handleOffer = async ({ offer, from }) => {
       await handleReceiveOffer(offer, from);
-    });
+    };
 
     // Receive video answer
-    socket.on('video-answer', async ({ answer, from }) => {
+    const handleAnswer = async ({ answer, from }) => {
       await handleReceiveAnswer(answer, from);
-    });
+    };
 
     // Receive ICE candidate
-    socket.on('ice-candidate', async ({ candidate, from }) => {
+    const handleIceCandidate = async ({ candidate, from }) => {
       await handleReceiveIceCandidate(candidate, from);
-    });
+    };
 
     // User left
-    socket.on('user-left', ({ socketId }) => {
+    const handleUserLeftEvent = ({ socketId }) => {
       handleUserLeft(socketId);
-    });
+    };
+
+    socket.on('user-joined', handleUserJoined);
+    socket.on('existing-participants', handleExistingParticipants);
+    socket.on('video-offer', handleOffer);
+    socket.on('video-answer', handleAnswer);
+    socket.on('ice-candidate', handleIceCandidate);
+    socket.on('user-left', handleUserLeftEvent);
 
     return () => {
-      socket.off('user-joined');
-      socket.off('existing-participants');
-      socket.off('video-offer');
-      socket.off('video-answer');
-      socket.off('ice-candidate');
-      socket.off('user-left');
+      socket.off('user-joined', handleUserJoined);
+      socket.off('existing-participants', handleExistingParticipants);
+      socket.off('video-offer', handleOffer);
+      socket.off('video-answer', handleAnswer);
+      socket.off('ice-candidate', handleIceCandidate);
+      socket.off('user-left', handleUserLeftEvent);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, localStream]);
+  }, [socket, hasLocalStream]); // Only attach listeners when we have a stream to share!
 
-  const startActivityDetection = () => {
-    const checkAudioLevels = () => {
-      const speakers = new Set();
-      const threshold = 10; // Adjust based on sensitivity needs
+  // ... (startActivityDetection and attachAnalyser remain same)
 
-      analysers.current.forEach((analyser, id) => {
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteFrequencyData(dataArray);
-
-        // Calculate average volume
-        const sum = dataArray.reduce((acc, val) => acc + val, 0);
-        const average = sum / dataArray.length;
-
-        if (average > threshold) {
-          speakers.add(id);
-        }
-      });
-
-      // Check local volume if mic is on
-      if (isMicOn && localStream) {
-        // Local analysis logic would go here if we wanted to highlight self
-        // But usually we just highlight others. Let's stick to highlighting everyone including self if needed.
-        // For now, let's keep it simple and highlight peers.
-      }
-
-      setActiveSpeakers(speakers);
-      animationRef.current = requestAnimationFrame(checkAudioLevels);
-    };
-
-    checkAudioLevels();
-  };
-
-  const attachAnalyser = (stream, id) => {
-    if (!audioContext.current || !stream.getAudioTracks().length) return;
-
-    try {
-      const source = audioContext.current.createMediaStreamSource(stream);
-      const analyser = audioContext.current.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analysers.current.set(id, analyser);
-    } catch (err) {
-      console.error("Audio Context Error:", err);
-    }
-  };
-
-  // ... (use previous useEffects for socket events) ...
-
-  // Modified startLocalStream to attach analyser
-  const startLocalStream = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      setLocalStream(stream);
-      originalStream.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      // Attach analyser for local stream (id="local")
-      attachAnalyser(stream, 'local');
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      alert('Could not access camera/microphone. Please check permissions.');
-    }
-  };
-
-  const stopLocalStream = () => {
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-    }
-    peerConnections.current.forEach((pc) => pc.close());
-  };
-
-  const createPeerConnection = async (socketId, createOffer) => {
+  // Modified createPeerConnection to accept username
+  const createPeerConnection = async (socketId, createOffer, username) => {
     if (peerConnections.current.has(socketId)) return;
 
     const pc = new RTCPeerConnection(iceServers);
@@ -187,7 +129,7 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
       const stream = event.streams[0];
       setPeers((prev) => {
         const newPeers = new Map(prev);
-        newPeers.set(socketId, { connection: pc, stream });
+        newPeers.set(socketId, { connection: pc, stream, username });
         return newPeers;
       });
       // Attach analyser for this peer
@@ -206,12 +148,16 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
   };
 
   const handleReceiveOffer = async (offer, from) => {
+    // If we receive an offer, we need to create a PC if it doesn't exist
     if (!peerConnections.current.has(from)) {
-      await createPeerConnection(from, false);
+      await createPeerConnection(from, false, 'Participant');
     }
 
     const pc = peerConnections.current.get(from);
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    // Important: We must have local tracks added by now (createPeerConnection does it if localStream exists)
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
@@ -362,7 +308,7 @@ const VideoCall = ({ socket, roomId, userId, username }) => {
               className="w-full h-full object-cover"
             />
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm text-white">
-              Participant {socketId.substr(0, 4)}...
+              {peer.username || `Participant ${socketId.substr(0, 4)}...`}
             </div>
           </div>
         ))}
